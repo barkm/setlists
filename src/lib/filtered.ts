@@ -11,6 +11,7 @@ import {
 	getTracks,
 	replaceTracks,
 	type Artist,
+	type CoverImage,
 	type Playlist,
 	type Track
 } from './spotify/api';
@@ -124,10 +125,15 @@ const updateDefinition = async (
 		playlist.id,
 		tracks.map((track) => track.uri)
 	);
+	playlist.cover = await getCover(playlist.id);
+	return filtered_playlist;
+};
+
+const getCover = async (playlist_id: string): Promise<CoverImage | undefined> => {
 	let cover_url = undefined;
 	let retries = 0;
 	while (cover_url === undefined && retries < 5) {
-		const cover = await getPlaylistCoverImage(playlist.id);
+		const cover = await getPlaylistCoverImage(playlist_id);
 		if (cover && cover?.height === null) {
 			cover_url = cover.url;
 			break;
@@ -135,14 +141,13 @@ const updateDefinition = async (
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		retries++;
 	}
-	playlist.cover = cover_url
+	return cover_url
 		? {
 				url: cover_url,
 				width: null,
 				height: null
 			}
 		: undefined;
-	return filtered_playlist;
 };
 
 export const filterFilteredPlaylists = async (
