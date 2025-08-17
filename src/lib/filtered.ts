@@ -142,16 +142,7 @@ const updateDefinition = async (
 				height: null
 			}
 		: undefined;
-	return {
-		playlist: playlist,
-		included_playlists: included_playlists,
-		excluded_playlists: excluded_playlists,
-		required_playlists: required_playlists,
-		duration_limits: duration_limits,
-		release_year_limits: release_year_limits,
-		required_artists: required_artists,
-		updating: false
-	};
+	return filtered_playlist;
 };
 
 export const filterFilteredPlaylists = async (
