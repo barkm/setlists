@@ -28,6 +28,74 @@ export interface FilteredPlaylist {
 	updating: boolean;
 }
 
+// --- Stored definition types ---
+
+type StoredLimits = { min: number | null; max: number | null };
+
+type DefinitionV1 = {
+	included_playlist_ids: string[];
+	excluded_playlist_ids: string[];
+	required_playlist_ids: string[];
+	duration_limits?: StoredLimits;
+	release_year_limits?: StoredLimits;
+	required_artist_ids?: string[];
+};
+
+type DefinitionV2 = {
+	version: 2;
+	included_playlist_ids: string[];
+	excluded_playlist_ids: string[];
+	required_playlist_ids: string[];
+	duration_limits: StoredLimits;
+	release_year_limits: StoredLimits;
+	required_artist_ids: string[];
+};
+
+type CurrentDefinition = DefinitionV2;
+
+const migrate = (raw: unknown): CurrentDefinition => {
+	const def = raw as Record<string, unknown>;
+	const version = (def.version as number) ?? 1;
+
+	if (version === 1) {
+		const v1 = def as DefinitionV1;
+		return migrate({
+			version: 2,
+			included_playlist_ids: v1.included_playlist_ids,
+			excluded_playlist_ids: v1.excluded_playlist_ids,
+			required_playlist_ids: v1.required_playlist_ids,
+			duration_limits: v1.duration_limits ?? { min: 0, max: null },
+			release_year_limits: v1.release_year_limits ?? { min: null, max: null },
+			required_artist_ids: v1.required_artist_ids ?? []
+		} satisfies DefinitionV2);
+	}
+
+	return def as CurrentDefinition;
+};
+
+const serializeDefinition = (
+	included_playlists: Playlist[],
+	excluded_playlists: Playlist[],
+	required_playlists: Playlist[],
+	duration_limits: Limits,
+	release_year_limits: Limits,
+	required_artists: Artist[]
+): CurrentDefinition => ({
+	version: 2,
+	included_playlist_ids: included_playlists.map((p) => p.id),
+	excluded_playlist_ids: excluded_playlists.map((p) => p.id),
+	required_playlist_ids: required_playlists.map((p) => p.id),
+	duration_limits: {
+		min: isFinite(duration_limits.min) ? duration_limits.min : null,
+		max: isFinite(duration_limits.max) ? duration_limits.max : null
+	},
+	release_year_limits: {
+		min: isFinite(release_year_limits.min) ? release_year_limits.min : null,
+		max: isFinite(release_year_limits.max) ? release_year_limits.max : null
+	},
+	required_artist_ids: required_artists.map((a) => a.id)
+});
+
 export const createFilteredPlaylist = async (
 	make_request: MakeRequest,
 	cover_data: string,
@@ -101,14 +169,14 @@ const updateDefinition = async (
 		required_artists: required_artists,
 		updating: false
 	};
-	const definition = {
-		included_playlist_ids: included_playlists.map((playlist) => playlist.id),
-		excluded_playlist_ids: excluded_playlists.map((playlist) => playlist.id),
-		required_playlist_ids: required_playlists.map((playlist) => playlist.id),
-		duration_limits: duration_limits,
-		release_year_limits: release_year_limits,
-		required_artist_ids: required_artists.map((artist) => artist.id)
-	};
+	const definition = serializeDefinition(
+		included_playlists,
+		excluded_playlists,
+		required_playlists,
+		duration_limits,
+		release_year_limits,
+		required_artists
+	);
 	const cover = writeJpegComment(cover_data, JSON.stringify(definition));
 	const cover_base64 = removeDataUrlPrefix(cover);
 	let success = false;
@@ -193,7 +261,7 @@ const toFilteredPlaylist = async (
 	}
 	const dataUrl = await fetchImageData(playlist.cover.url);
 	const comment = readJpegComment(dataUrl);
-	const definition = JSON.parse(comment.toString());
+	const definition = migrate(JSON.parse(comment.toString()));
 	const included_playlists = await Promise.all(
 		definition.included_playlist_ids.map((id: string) => getPlaylist(id, make_request))
 	);
@@ -203,28 +271,15 @@ const toFilteredPlaylist = async (
 	const required_playlists = await Promise.all(
 		definition.required_playlist_ids.map((id: string) => getPlaylist(id, make_request))
 	);
-	let duration_limits = { min: 0, max: Infinity };
-	if ('duration_limits' in definition) {
-		duration_limits = {
-			min: definition.duration_limits.min,
-			max: definition.duration_limits.max === null ? Infinity : definition.duration_limits.max
-		};
-	}
-	let release_year_limits = { min: -Infinity, max: Infinity };
-	if ('release_year_limits' in definition) {
-		release_year_limits = {
-			min:
-				definition.release_year_limits.min === null
-					? -Infinity
-					: definition.release_year_limits.min,
-			max:
-				definition.release_year_limits.max === null ? Infinity : definition.release_year_limits.max
-		};
-	}
-	let required_artists: Artist[] = [];
-	if ('required_artist_ids' in definition) {
-		required_artists = await getArtists(definition.required_artist_ids, make_request);
-	}
+	const duration_limits = {
+		min: definition.duration_limits.min ?? 0,
+		max: definition.duration_limits.max ?? Infinity
+	};
+	const release_year_limits = {
+		min: definition.release_year_limits.min ?? -Infinity,
+		max: definition.release_year_limits.max ?? Infinity
+	};
+	const required_artists = await getArtists(definition.required_artist_ids, make_request);
 	return {
 		playlist: playlist,
 		included_playlists: included_playlists,
