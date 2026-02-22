@@ -1,7 +1,13 @@
 <script lang="ts">
 	import type { Artist, Playlist } from '$lib/spotify/api';
 	import { authorizedRequest } from '$lib/spotify/authorization';
-	import { update, updateFilteredPlaylist, type FilteredPlaylist } from '$lib/filtered';
+	import {
+		update,
+		updateFilteredPlaylist,
+		buildSimpleExpression,
+		getSimplePlaylists,
+		type FilteredPlaylist
+	} from '$lib/filtered';
 	import RandomSquare from './RandomSquare.svelte';
 
 	interface Props {
@@ -15,19 +21,17 @@
 
 	let { playlists, filtered_playlist = $bindable(), onRemove }: Props = $props();
 
+	const simple = $derived(
+		getSimplePlaylists(filtered_playlist.expression, filtered_playlist.playlists)
+	);
+
 	const concat_playlist_names = (playlists: Playlist[]) => {
 		return playlists.map((playlist) => playlist.name).join(', ');
 	};
 
-	const included_playlist_names = $derived(
-		concat_playlist_names(filtered_playlist.included_playlists)
-	);
-	const excluded_playlist_names = $derived(
-		concat_playlist_names(filtered_playlist.excluded_playlists)
-	);
-	const required_playlist_names = $derived(
-		concat_playlist_names(filtered_playlist.required_playlists)
-	);
+	const included_playlist_names = $derived(concat_playlist_names(simple.included));
+	const excluded_playlist_names = $derived(concat_playlist_names(simple.excluded));
+	const required_playlist_names = $derived(concat_playlist_names(simple.required));
 
 	const get_duration_limit_str = (duration_limits: Limits) => {
 		if (duration_limits.min === 0 && duration_limits.max === Infinity) {
@@ -60,6 +64,10 @@
 
 	let show_details = $state(false);
 	let editing = $state(false);
+
+	let edit_included = $state<Playlist[]>([]);
+	let edit_excluded = $state<Playlist[]>([]);
+	let edit_required = $state<Playlist[]>([]);
 </script>
 
 <container>
@@ -81,9 +89,9 @@
 			{#if editing}
 				<CreationOptions
 					{playlists}
-					bind:included_playlists={filtered_playlist.included_playlists}
-					bind:excluded_playlists={filtered_playlist.excluded_playlists}
-					bind:required_playlists={filtered_playlist.required_playlists}
+					bind:included_playlists={edit_included}
+					bind:excluded_playlists={edit_excluded}
+					bind:required_playlists={edit_required}
 					bind:is_public={filtered_playlist.playlist.is_public}
 					bind:duration_limits={filtered_playlist.duration_limits}
 					bind:release_year_limits={filtered_playlist.release_year_limits}
@@ -93,14 +101,21 @@
 					<button
 						class="click"
 						disabled={filtered_playlist.updating}
-						onclick={logged_in_guard(() =>
+						onclick={logged_in_guard(() => {
+							filtered_playlist = {
+								...filtered_playlist,
+								expression: buildSimpleExpression(edit_included, edit_excluded, edit_required),
+								playlists: new Map(
+									[...edit_included, ...edit_excluded, ...edit_required].map((p) => [p.id, p])
+								)
+							};
 							updateFilteredPlaylist(authorizedRequest, filtered_playlist)
 								.then((s) => {
 									filtered_playlist = s;
 									editing = false;
 								})
-								.catch((e) => console.error(e))
-						)}>done</button
+								.catch((e) => console.error(e));
+						})}>done</button
 					>
 					<button
 						class="click"
@@ -151,6 +166,13 @@
 						class="click"
 						disabled={filtered_playlist.updating}
 						onclick={() => {
+							const s = getSimplePlaylists(
+								filtered_playlist.expression,
+								filtered_playlist.playlists
+							);
+							edit_included = s.included;
+							edit_excluded = s.excluded;
+							edit_required = s.required;
 							editing = true;
 						}}>edit</button
 					>

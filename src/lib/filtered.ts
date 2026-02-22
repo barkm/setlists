@@ -19,14 +19,19 @@ import type { MakeRequest } from './spotify/request';
 
 export interface FilteredPlaylist {
 	playlist: Playlist;
-	included_playlists: Playlist[];
-	excluded_playlists: Playlist[];
-	required_playlists: Playlist[];
+	expression: PlaylistNode;
+	playlists: Map<string, Playlist>;
 	duration_limits: Limits;
 	release_year_limits: Limits;
 	required_artists: Artist[];
 	updating: boolean;
 }
+
+export type PlaylistNode =
+	| { type: 'playlist'; id: string }
+	| { type: 'union'; operands: PlaylistNode[] }
+	| { type: 'intersection'; operands: PlaylistNode[] }
+	| { type: 'difference'; left: PlaylistNode; right: PlaylistNode };
 
 // --- Stored definition types ---
 
@@ -51,7 +56,20 @@ type DefinitionV2 = {
 	required_artist_ids: string[];
 };
 
-type CurrentDefinition = DefinitionV2;
+type DefinitionV3 = {
+	version: 3;
+	expression: PlaylistNode;
+	duration_limits: StoredLimits;
+	release_year_limits: StoredLimits;
+	required_artist_ids: string[];
+};
+
+type CurrentDefinition = DefinitionV3;
+
+const idsToNode = (ids: string[]): PlaylistNode => {
+	if (ids.length === 1) return { type: 'playlist', id: ids[0] };
+	return { type: 'union', operands: ids.map((id) => ({ type: 'playlist', id })) };
+};
 
 const migrate = (raw: unknown): CurrentDefinition => {
 	const def = raw as Record<string, unknown>;
@@ -70,21 +88,39 @@ const migrate = (raw: unknown): CurrentDefinition => {
 		} satisfies DefinitionV2);
 	}
 
+	if (version === 2) {
+		const v2 = def as DefinitionV2;
+		let expression: PlaylistNode = {
+			type: 'difference',
+			left: idsToNode(v2.included_playlist_ids),
+			right: idsToNode(v2.excluded_playlist_ids)
+		};
+		if (v2.required_playlist_ids.length > 0) {
+			expression = {
+				type: 'intersection',
+				operands: [expression, idsToNode(v2.required_playlist_ids)]
+			};
+		}
+		return migrate({
+			version: 3,
+			expression,
+			duration_limits: v2.duration_limits,
+			release_year_limits: v2.release_year_limits,
+			required_artist_ids: v2.required_artist_ids
+		} satisfies DefinitionV3);
+	}
+
 	return def as CurrentDefinition;
 };
 
 const serializeDefinition = (
-	included_playlists: Playlist[],
-	excluded_playlists: Playlist[],
-	required_playlists: Playlist[],
+	expression: PlaylistNode,
 	duration_limits: Limits,
 	release_year_limits: Limits,
 	required_artists: Artist[]
 ): CurrentDefinition => ({
-	version: 2,
-	included_playlist_ids: included_playlists.map((p) => p.id),
-	excluded_playlist_ids: excluded_playlists.map((p) => p.id),
-	required_playlist_ids: required_playlists.map((p) => p.id),
+	version: 3,
+	expression,
 	duration_limits: {
 		min: isFinite(duration_limits.min) ? duration_limits.min : null,
 		max: isFinite(duration_limits.max) ? duration_limits.max : null
@@ -95,6 +131,86 @@ const serializeDefinition = (
 	},
 	required_artist_ids: required_artists.map((a) => a.id)
 });
+
+const collectPlaylistIds = (node: PlaylistNode): string[] => {
+	switch (node.type) {
+		case 'playlist':
+			return [node.id];
+		case 'union':
+			return node.operands.flatMap(collectPlaylistIds);
+		case 'intersection':
+			return node.operands.flatMap(collectPlaylistIds);
+		case 'difference':
+			return [...collectPlaylistIds(node.left), ...collectPlaylistIds(node.right)];
+	}
+};
+
+// Builds the canonical simple expression from three playlist arrays.
+export const buildSimpleExpression = (
+	included: Playlist[],
+	excluded: Playlist[],
+	required: Playlist[]
+): PlaylistNode => {
+	let expression: PlaylistNode = idsToNode(included.map((p) => p.id));
+	if (excluded.length > 0) {
+		expression = {
+			type: 'difference',
+			left: expression,
+			right: idsToNode(excluded.map((p) => p.id))
+		};
+	}
+	if (required.length > 0) {
+		expression = {
+			type: 'intersection',
+			operands: [expression, idsToNode(required.map((p) => p.id))]
+		};
+	}
+	return expression;
+};
+
+// Extracts included/excluded/required playlist arrays from the canonical simple expression form.
+// Falls back to showing all playlists as included for general expressions.
+export const getSimplePlaylists = (
+	expression: PlaylistNode,
+	playlists: Map<string, Playlist>
+): { included: Playlist[]; excluded: Playlist[]; required: Playlist[] } => {
+	const lookup = (ids: string[]): Playlist[] =>
+		ids.map((id) => playlists.get(id)).filter((p): p is Playlist => p !== undefined);
+
+	const extractIds = (node: PlaylistNode): string[] => {
+		if (node.type === 'playlist') return [node.id];
+		if (node.type === 'union') return node.operands.flatMap(extractIds);
+		return [];
+	};
+
+	// Canonical form with required: intersection([difference(union(incl), union(excl)), union(req)])
+	if (expression.type === 'intersection' && expression.operands.length === 2) {
+		const [first, second] = expression.operands;
+		if (first.type === 'difference') {
+			return {
+				included: lookup(extractIds(first.left)),
+				excluded: lookup(extractIds(first.right)),
+				required: lookup(extractIds(second))
+			};
+		}
+	}
+
+	// Canonical form without required: difference(union(incl), union(excl))
+	if (expression.type === 'difference') {
+		return {
+			included: lookup(extractIds(expression.left)),
+			excluded: lookup(extractIds(expression.right)),
+			required: []
+		};
+	}
+
+	// Fallback: all as included
+	return {
+		included: lookup([...new Set(collectPlaylistIds(expression))]),
+		excluded: [],
+		required: []
+	};
+};
 
 export const createFilteredPlaylist = async (
 	make_request: MakeRequest,
@@ -109,13 +225,20 @@ export const createFilteredPlaylist = async (
 	required_artists: Artist[]
 ): Promise<FilteredPlaylist> => {
 	const playlist = await createPlaylist(name, is_public, '');
+	const expression = buildSimpleExpression(
+		included_playlists,
+		excluded_playlists,
+		required_playlists
+	);
+	const playlists = new Map(
+		[...included_playlists, ...excluded_playlists, ...required_playlists].map((p) => [p.id, p])
+	);
 	return updateDefinition(
 		make_request,
 		cover_data,
 		playlist,
-		included_playlists,
-		excluded_playlists,
-		required_playlists,
+		expression,
+		playlists,
 		is_public,
 		duration_limits,
 		release_year_limits,
@@ -136,9 +259,8 @@ export const updateFilteredPlaylist = async (
 		make_request,
 		cover_data,
 		filtered_playlist.playlist,
-		filtered_playlist.included_playlists,
-		filtered_playlist.excluded_playlists,
-		filtered_playlist.required_playlists,
+		filtered_playlist.expression,
+		filtered_playlist.playlists,
 		filtered_playlist.playlist.is_public,
 		filtered_playlist.duration_limits,
 		filtered_playlist.release_year_limits,
@@ -150,9 +272,8 @@ const updateDefinition = async (
 	make_request: MakeRequest,
 	cover_data: string,
 	playlist: Playlist,
-	included_playlists: Playlist[],
-	excluded_playlists: Playlist[],
-	required_playlists: Playlist[],
+	expression: PlaylistNode,
+	playlists: Map<string, Playlist>,
 	is_public: boolean,
 	duration_limits: Limits,
 	release_year_limits: Limits,
@@ -160,19 +281,16 @@ const updateDefinition = async (
 ): Promise<FilteredPlaylist> => {
 	changePlaylistDetails(playlist.id, is_public, make_request);
 	const filtered_playlist: FilteredPlaylist = {
-		playlist: playlist,
-		included_playlists: included_playlists,
-		excluded_playlists: excluded_playlists,
-		required_playlists: required_playlists,
-		duration_limits: duration_limits,
-		release_year_limits: release_year_limits,
-		required_artists: required_artists,
+		playlist,
+		expression,
+		playlists,
+		duration_limits,
+		release_year_limits,
+		required_artists,
 		updating: false
 	};
 	const definition = serializeDefinition(
-		included_playlists,
-		excluded_playlists,
-		required_playlists,
+		expression,
 		duration_limits,
 		release_year_limits,
 		required_artists
@@ -238,13 +356,20 @@ const isFilteredPlaylist = async (playlist: Playlist): Promise<boolean> => {
 		}
 		const data_url = await fetchImageData(playlist.cover.url);
 		const comment = readJpegComment(data_url);
-		const definition = JSON.parse(comment.toString());
-		if (
-			!Array.isArray(definition.included_playlist_ids) ||
-			!Array.isArray(definition.excluded_playlist_ids) ||
-			!Array.isArray(definition.required_playlist_ids)
-		) {
-			return false;
+		const raw = JSON.parse(comment.toString()) as Record<string, unknown>;
+		const version = (raw.version as number | undefined) ?? 1;
+		if (version <= 2) {
+			if (
+				!Array.isArray(raw.included_playlist_ids) ||
+				!Array.isArray(raw.excluded_playlist_ids) ||
+				!Array.isArray(raw.required_playlist_ids)
+			) {
+				return false;
+			}
+		} else {
+			if (typeof raw.expression !== 'object' || raw.expression === null) {
+				return false;
+			}
 		}
 	} catch (error) {
 		return false;
@@ -262,15 +387,11 @@ const toFilteredPlaylist = async (
 	const dataUrl = await fetchImageData(playlist.cover.url);
 	const comment = readJpegComment(dataUrl);
 	const definition = migrate(JSON.parse(comment.toString()));
-	const included_playlists = await Promise.all(
-		definition.included_playlist_ids.map((id: string) => getPlaylist(id, make_request))
+	const playlist_ids = [...new Set(collectPlaylistIds(definition.expression))];
+	const playlist_entries = await Promise.all(
+		playlist_ids.map(async (id) => [id, await getPlaylist(id, make_request)] as const)
 	);
-	const excluded_playlists = await Promise.all(
-		definition.excluded_playlist_ids.map((id: string) => getPlaylist(id, make_request))
-	);
-	const required_playlists = await Promise.all(
-		definition.required_playlist_ids.map((id: string) => getPlaylist(id, make_request))
-	);
+	const playlists = new Map(playlist_entries);
 	const duration_limits = {
 		min: definition.duration_limits.min ?? 0,
 		max: definition.duration_limits.max ?? Infinity
@@ -281,13 +402,12 @@ const toFilteredPlaylist = async (
 	};
 	const required_artists = await getArtists(definition.required_artist_ids, make_request);
 	return {
-		playlist: playlist,
-		included_playlists: included_playlists,
-		excluded_playlists: excluded_playlists,
-		required_playlists: required_playlists,
-		duration_limits: duration_limits,
-		release_year_limits: release_year_limits,
-		required_artists: required_artists,
+		playlist,
+		expression: definition.expression,
+		playlists,
+		duration_limits,
+		release_year_limits,
+		required_artists,
 		updating: false
 	};
 };
@@ -305,26 +425,46 @@ export const update = async (
 	filtered_playlist.updating = false;
 };
 
+const evaluateExpression = (
+	node: PlaylistNode,
+	tracksByPlaylist: Map<string, Track[]>
+): Track[] => {
+	switch (node.type) {
+		case 'playlist':
+			return tracksByPlaylist.get(node.id) ?? [];
+		case 'union':
+			return node.operands.flatMap((n) => evaluateExpression(n, tracksByPlaylist));
+		case 'intersection': {
+			if (node.operands.length === 0) return [];
+			const [head, ...rest] = node.operands;
+			return rest.reduce(
+				(acc, n) => intersection(acc, evaluateExpression(n, tracksByPlaylist), (t) => t.uri),
+				evaluateExpression(head, tracksByPlaylist)
+			);
+		}
+		case 'difference':
+			return difference(
+				evaluateExpression(node.left, tracksByPlaylist),
+				evaluateExpression(node.right, tracksByPlaylist),
+				(t) => t.uri
+			);
+	}
+};
+
 const getAndFilterTracks = async (
 	make_request: MakeRequest,
 	filtered_playlist: FilteredPlaylist
 ): Promise<Track[]> => {
-	const included_tracks = await getTracksFromPlaylists(
-		make_request,
-		filtered_playlist.included_playlists
+	const ids = [...new Set(collectPlaylistIds(filtered_playlist.expression))];
+	const entries = await Promise.all(
+		ids.map(async (id) => [id, await getTracks(id, make_request)] as const)
 	);
-	const excluded_tracks = await getTracksFromPlaylists(
-		make_request,
-		filtered_playlist.excluded_playlists
-	);
-	const required_tracks = await getTracksFromPlaylists(
-		make_request,
-		filtered_playlist.required_playlists
-	);
+	const tracksByPlaylist = new Map(entries);
+	const tracks = evaluateExpression(filtered_playlist.expression, tracksByPlaylist);
 	return filterTracks(
-		included_tracks,
-		excluded_tracks,
-		required_tracks,
+		tracks,
+		[],
+		[],
 		filtered_playlist.duration_limits,
 		filtered_playlist.release_year_limits,
 		filtered_playlist.required_artists
