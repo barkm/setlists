@@ -76,10 +76,7 @@
 				playlist_name,
 				expression,
 				playlists,
-				is_public,
-				{ min: 0, max: Infinity },
-				{ min: -Infinity, max: Infinity },
-				[]
+				is_public
 			);
 			filtered_playlists = [filtered_playlist, ...filtered_playlists];
 			playlist_name = '';

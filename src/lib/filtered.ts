@@ -1,16 +1,13 @@
-import type { Limits } from './duration';
 import { readJpegComment, writeJpegComment, removeDataUrlPrefix } from './jpeg/comment';
 import { fetchImageData } from './jpeg/download';
 import {
 	addPlaylistCoverImage,
 	changePlaylistDetails,
 	createPlaylist,
-	getArtists,
 	getPlaylist,
 	getPlaylistCoverImage,
 	getTracks,
 	replaceTracks,
-	type Artist,
 	type CoverImage,
 	type Playlist,
 	type Track
@@ -21,9 +18,6 @@ export interface FilteredPlaylist {
 	playlist: Playlist;
 	expression: PlaylistNode;
 	playlists: Map<string, Playlist>;
-	duration_limits: Limits;
-	release_year_limits: Limits;
-	required_artists: Artist[];
 	updating: boolean;
 }
 
@@ -64,7 +58,12 @@ type DefinitionV3 = {
 	required_artist_ids: string[];
 };
 
-type CurrentDefinition = DefinitionV3;
+type DefinitionV4 = {
+	version: 4;
+	expression: PlaylistNode;
+};
+
+type CurrentDefinition = DefinitionV4;
 
 const idsToNode = (ids: string[]): PlaylistNode => {
 	if (ids.length === 1) return { type: 'playlist', id: ids[0] };
@@ -110,26 +109,17 @@ const migrate = (raw: unknown): CurrentDefinition => {
 		} satisfies DefinitionV3);
 	}
 
+	if (version === 3) {
+		const v3 = def as DefinitionV3;
+		return { version: 4, expression: v3.expression } satisfies DefinitionV4;
+	}
+
 	return def as CurrentDefinition;
 };
 
-const serializeDefinition = (
-	expression: PlaylistNode,
-	duration_limits: Limits,
-	release_year_limits: Limits,
-	required_artists: Artist[]
-): CurrentDefinition => ({
-	version: 3,
-	expression,
-	duration_limits: {
-		min: isFinite(duration_limits.min) ? duration_limits.min : null,
-		max: isFinite(duration_limits.max) ? duration_limits.max : null
-	},
-	release_year_limits: {
-		min: isFinite(release_year_limits.min) ? release_year_limits.min : null,
-		max: isFinite(release_year_limits.max) ? release_year_limits.max : null
-	},
-	required_artist_ids: required_artists.map((a) => a.id)
+const serializeDefinition = (expression: PlaylistNode): CurrentDefinition => ({
+	version: 4,
+	expression
 });
 
 export const collectPlaylistIds = (node: PlaylistNode): string[] => {
@@ -145,45 +135,20 @@ export const collectPlaylistIds = (node: PlaylistNode): string[] => {
 	}
 };
 
-export const getTracksFromExpression = async (
-	make_request: MakeRequest,
-	expression: PlaylistNode
-): Promise<Track[]> => {
-	const ids = [...new Set(collectPlaylistIds(expression))];
-	const entries = await Promise.all(
-		ids.map(async (id) => [id, await getTracks(id, make_request)] as const)
-	);
-	const tracksByPlaylist = new Map(entries);
-	return evaluateExpression(expression, tracksByPlaylist);
-};
-
 export const createFilteredPlaylist = async (
 	make_request: MakeRequest,
 	cover_data: string,
 	name: string,
 	expression: PlaylistNode,
 	all_playlists: Playlist[],
-	is_public: boolean,
-	duration_limits: Limits,
-	release_year_limits: Limits,
-	required_artists: Artist[]
+	is_public: boolean
 ): Promise<FilteredPlaylist> => {
 	const playlist = await createPlaylist(name, is_public, '');
 	const referenced_ids = new Set(collectPlaylistIds(expression));
 	const playlists = new Map(
 		all_playlists.filter((p) => referenced_ids.has(p.id)).map((p) => [p.id, p])
 	);
-	return updateDefinition(
-		make_request,
-		cover_data,
-		playlist,
-		expression,
-		playlists,
-		is_public,
-		duration_limits,
-		release_year_limits,
-		required_artists
-	);
+	return updateDefinition(make_request, cover_data, playlist, expression, playlists, is_public);
 };
 
 export const updateFilteredPlaylist = async (
@@ -201,10 +166,7 @@ export const updateFilteredPlaylist = async (
 		filtered_playlist.playlist,
 		filtered_playlist.expression,
 		filtered_playlist.playlists,
-		filtered_playlist.playlist.is_public,
-		filtered_playlist.duration_limits,
-		filtered_playlist.release_year_limits,
-		filtered_playlist.required_artists
+		filtered_playlist.playlist.is_public
 	);
 };
 
@@ -214,27 +176,16 @@ const updateDefinition = async (
 	playlist: Playlist,
 	expression: PlaylistNode,
 	playlists: Map<string, Playlist>,
-	is_public: boolean,
-	duration_limits: Limits,
-	release_year_limits: Limits,
-	required_artists: Artist[]
+	is_public: boolean
 ): Promise<FilteredPlaylist> => {
 	changePlaylistDetails(playlist.id, is_public, make_request);
 	const filtered_playlist: FilteredPlaylist = {
 		playlist,
 		expression,
 		playlists,
-		duration_limits,
-		release_year_limits,
-		required_artists,
 		updating: false
 	};
-	const definition = serializeDefinition(
-		expression,
-		duration_limits,
-		release_year_limits,
-		required_artists
-	);
+	const definition = serializeDefinition(expression);
 	const cover = writeJpegComment(cover_data, JSON.stringify(definition));
 	const cover_base64 = removeDataUrlPrefix(cover);
 	let success = false;
@@ -332,22 +283,10 @@ const toFilteredPlaylist = async (
 		playlist_ids.map(async (id) => [id, await getPlaylist(id, make_request)] as const)
 	);
 	const playlists = new Map(playlist_entries);
-	const duration_limits = {
-		min: definition.duration_limits.min ?? 0,
-		max: definition.duration_limits.max ?? Infinity
-	};
-	const release_year_limits = {
-		min: definition.release_year_limits.min ?? -Infinity,
-		max: definition.release_year_limits.max ?? Infinity
-	};
-	const required_artists = await getArtists(definition.required_artist_ids, make_request);
 	return {
 		playlist,
 		expression: definition.expression,
 		playlists,
-		duration_limits,
-		release_year_limits,
-		required_artists,
 		updating: false
 	};
 };
@@ -400,46 +339,7 @@ const getAndFilterTracks = async (
 		ids.map(async (id) => [id, await getTracks(id, make_request)] as const)
 	);
 	const tracksByPlaylist = new Map(entries);
-	const tracks = evaluateExpression(filtered_playlist.expression, tracksByPlaylist);
-	return filterTracks(
-		tracks,
-		[],
-		[],
-		filtered_playlist.duration_limits,
-		filtered_playlist.release_year_limits,
-		filtered_playlist.required_artists
-	);
-};
-
-export const filterTracks = (
-	included_tracks: Track[],
-	excluded_tracks: Track[],
-	required_tracks: Track[],
-	duration_limits: { min: number; max: number },
-	release_year_limits: { min: number; max: number },
-	required_artists: Artist[]
-): Track[] => {
-	let tracks = removeDuplicates(included_tracks, (track) => track.uri);
-	tracks = tracks.filter((track) => {
-		return track.duration_ms >= duration_limits.min && track.duration_ms <= duration_limits.max;
-	});
-	tracks = tracks.filter((track) => {
-		return (
-			track.album.release_year >= release_year_limits.min &&
-			track.album.release_year <= release_year_limits.max
-		);
-	});
-	let required_artists_set = new Set(required_artists.map((artist) => artist.id));
-	if (required_artists_set.size > 0) {
-		tracks = tracks.filter((track) => {
-			return track.artists.some((artist) => required_artists_set.has(artist.id));
-		});
-	}
-	tracks = difference(tracks, excluded_tracks, (track) => track.uri);
-	if (required_tracks.length > 0) {
-		tracks = intersection(tracks, required_tracks, (track) => track.uri);
-	}
-	return tracks;
+	return evaluateExpression(filtered_playlist.expression, tracksByPlaylist);
 };
 
 export const getTracksFromPlaylists = async (
@@ -450,14 +350,6 @@ export const getTracksFromPlaylists = async (
 		playlists.map((playlist) => getTracks(playlist.id, make_request))
 	);
 	return tracks.flat();
-};
-
-const removeDuplicates = <T, S>(array: Array<T>, key: (x: T) => S): Array<T> => {
-	const seen = new Set<S>();
-	return array.filter((x) => {
-		const k = key(x);
-		return seen.has(k) ? false : seen.add(k);
-	});
 };
 
 const intersection = <T, S>(a: Array<T>, b: Array<T>, key: (x: T) => S): Array<T> => {
