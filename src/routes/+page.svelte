@@ -4,7 +4,7 @@
 </script>
 
 <svelte:head>
-	<title>filtered playlists</title>
+	<title>setlists</title>
 </svelte:head>
 
 <LoginPage />
