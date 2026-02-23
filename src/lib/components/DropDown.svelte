@@ -17,11 +17,10 @@
 		}));
 	};
 
-	let multiselect_options: { label: string; value: T }[] = $state(to_options(options));
+	let multiselect_options = $derived(to_options(options));
 	let multiselect_selected: { label: string; value: T }[] = $state(to_options(selected));
 
 	$effect(() => {
-		multiselect_options = to_options(options);
 		multiselect_selected = to_options(selected);
 	});
 </script>

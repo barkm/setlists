@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { type Artist } from '$lib/spotify/api';
+	import { type Artist, type Track } from '$lib/spotify/api';
 	import { authorizedRequest } from '$lib/spotify/authorization';
 	import {
 		filterTracks,

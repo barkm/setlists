@@ -30,16 +30,16 @@
 		if (new_type === 'playlist') {
 			if (old.type === 'union' || old.type === 'intersection') {
 				setNode(old.operands.find((n) => n.type === 'playlist') ?? empty_playlist());
-			} else {
+			} else if (old.type === 'difference') {
 				setNode(old.left.type === 'playlist' ? old.left : empty_playlist());
 			}
 		} else if (new_type === 'union' || new_type === 'intersection') {
 			if (old.type === 'union' || old.type === 'intersection') {
-				setNode({ type: new_type, operands: old.operands });
+				setNode({ type: new_type, operands: old.operands } as PlaylistNode);
 			} else if (old.type === 'difference') {
-				setNode({ type: new_type, operands: [old.left, old.right] });
+				setNode({ type: new_type, operands: [old.left, old.right] } as PlaylistNode);
 			} else {
-				setNode({ type: new_type, operands: [old] });
+				setNode({ type: new_type, operands: [old] } as PlaylistNode);
 			}
 		} else {
 			// → difference
@@ -48,10 +48,10 @@
 				setNode({
 					type: 'difference',
 					left: first ?? empty_union(),
-					right: rest.length === 1 ? rest[0] : { type: 'union', operands: rest }
+					right: rest.length === 1 ? (rest[0] ?? empty_union()) : { type: 'union', operands: rest }
 				});
 			} else {
-				// playlist → difference
+				// playlist or difference → difference
 				setNode({ type: 'difference', left: old, right: empty_union() });
 			}
 		}
@@ -59,19 +59,21 @@
 
 	const add_child = () => {
 		if (node.type === 'union' || node.type === 'intersection') {
-			setNode({ ...node, operands: [...node.operands, empty_playlist()] });
+			setNode({ ...node, operands: [...node.operands, empty_playlist()] } as PlaylistNode);
 		}
 	};
 
 	const remove_child = (i: number) => {
 		if (node.type === 'union' || node.type === 'intersection') {
-			setNode({ ...node, operands: node.operands.filter((_, j) => j !== i) });
+			setNode({ ...node, operands: node.operands.filter((_, j) => j !== i) } as PlaylistNode);
 		}
 	};
 
-	const playlist_name = $derived(
-		node.type === 'playlist' ? (playlists.find((p) => p.id === node.id)?.name ?? node.id) : ''
-	);
+	const playlist_name = $derived.by(() => {
+		const n = node;
+		if (n.type !== 'playlist') return '';
+		return playlists.find((p) => p.id === n.id)?.name ?? n.id;
+	});
 </script>
 
 <node-row>
@@ -115,14 +117,15 @@
 </node-row>
 
 {#if node.type === 'union' || node.type === 'intersection'}
+	{@const operands = node.operands}
 	<children>
-		{#each node.operands as _, i}
+		{#each operands as _, i}
 			<ExpressionNode
-				node={node.operands[i]}
+				node={operands[i]}
 				{playlists}
 				{readonly}
 				onremove={() => remove_child(i)}
-				onchange={(newNode) => setNode({ ...node, operands: node.operands.map((o, j) => j === i ? newNode : o) })}
+				onchange={(newNode) => setNode({ ...node, operands: operands.map((o, j) => j === i ? newNode : o) } as PlaylistNode)}
 			/>
 		{/each}
 	</children>
@@ -133,14 +136,14 @@
 			node={node.left}
 			{playlists}
 			{readonly}
-			onchange={(newNode) => setNode({ ...node, left: newNode })}
+			onchange={(newNode) => setNode({ ...node, left: newNode } as PlaylistNode)}
 		/>
 		<span class="diff-label">minus</span>
 		<ExpressionNode
 			node={node.right}
 			{playlists}
 			{readonly}
-			onchange={(newNode) => setNode({ ...node, right: newNode })}
+			onchange={(newNode) => setNode({ ...node, right: newNode } as PlaylistNode)}
 		/>
 	</children>
 {/if}
