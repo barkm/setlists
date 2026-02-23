@@ -12,7 +12,6 @@
 	import { logged_in_guard } from '$lib/login';
 	import ExpressionNode from './ExpressionNode.svelte';
 	import PlaylistPrivacy from './PlaylistPrivacy.svelte';
-	import TracksFilter from './TracksFilter.svelte';
 
 	interface Props {
 		playlists: Playlist[];
@@ -54,9 +53,6 @@
 	});
 
 	let creating = $state(false);
-	let duration_limits = $state({ min: 0, max: Infinity });
-	let release_year_limits = $state({ min: -Infinity, max: Infinity });
-	let required_artists = $state([]);
 
 	const has_playlists = $derived(collectPlaylistIds(expression).length > 0);
 </script>
@@ -81,9 +77,9 @@
 				expression,
 				playlists,
 				is_public,
-				duration_limits,
-				release_year_limits,
-				required_artists
+				{ min: 0, max: Infinity },
+				{ min: -Infinity, max: Infinity },
+				[]
 			);
 			filtered_playlists = [filtered_playlist, ...filtered_playlists];
 			playlist_name = '';
@@ -98,12 +94,6 @@
 	<expression-editor>
 		<ExpressionNode bind:node={expression} {playlists} />
 	</expression-editor>
-	<TracksFilter
-		{expression}
-		bind:duration_limits
-		bind:release_year_limits
-		bind:required_artists
-	/>
 {/if}
 
 <style>

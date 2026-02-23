@@ -15,50 +15,19 @@
 		filtered_playlist: FilteredPlaylist;
 		onRemove: () => void;
 	}
-	import { ms_to_min_sec, type Limits } from '$lib/duration';
 	import { logged_in_guard } from '$lib/login';
 	import ExpressionNode from './ExpressionNode.svelte';
 	import PlaylistPrivacy from './PlaylistPrivacy.svelte';
-	import TracksFilter from './TracksFilter.svelte';
 
 	let { playlists, filtered_playlist = $bindable(), onRemove }: Props = $props();
-
-	const get_duration_limit_str = (duration_limits: Limits) => {
-		if (duration_limits.min === 0 && duration_limits.max === Infinity) {
-			return '';
-		}
-		const min = ms_to_min_sec(duration_limits.min);
-		const max = duration_limits.max === Infinity ? '+inf' : ms_to_min_sec(duration_limits.max);
-		return `durations: ${min} - ${max}`;
-	};
-
-	const get_release_year_limit_str = (release_year_limits: Limits) => {
-		if (release_year_limits.min === -Infinity && release_year_limits.max === Infinity) {
-			return '';
-		}
-		const min = release_year_limits.min === -Infinity ? '-inf' : release_year_limits.min;
-		const max = release_year_limits.max === Infinity ? '+inf' : release_year_limits.max;
-		return `release years: ${min} - ${max}`;
-	};
-
-	const get_required_artists_str = () => {
-		if (filtered_playlist.required_artists.length === 0) return '';
-		return `artists: ${filtered_playlist.required_artists.map((a) => a.name).join(', ')}`;
-	};
 
 	let show_details = $state(false);
 	let editing = $state(false);
 
 	let edit_expression = $state<PlaylistNode>({ type: 'union', operands: [] });
-	let edit_duration_limits = $state({ min: 0, max: Infinity });
-	let edit_release_year_limits = $state({ min: -Infinity, max: Infinity });
-	let edit_required_artists = $state(filtered_playlist.required_artists);
 
 	const start_editing = () => {
 		edit_expression = JSON.parse(JSON.stringify(filtered_playlist.expression));
-		edit_duration_limits = { ...filtered_playlist.duration_limits };
-		edit_release_year_limits = { ...filtered_playlist.release_year_limits };
-		edit_required_artists = [...filtered_playlist.required_artists];
 		editing = true;
 	};
 
@@ -70,10 +39,7 @@
 		filtered_playlist = {
 			...filtered_playlist,
 			expression: edit_expression,
-			playlists: updated_playlists,
-			duration_limits: edit_duration_limits,
-			release_year_limits: edit_release_year_limits,
-			required_artists: edit_required_artists
+			playlists: updated_playlists
 		};
 		filtered_playlist = await updateFilteredPlaylist(authorizedRequest, filtered_playlist);
 		editing = false;
@@ -101,12 +67,6 @@
 				<expression-editor>
 					<ExpressionNode bind:node={edit_expression} {playlists} />
 				</expression-editor>
-				<TracksFilter
-					expression={edit_expression}
-					bind:duration_limits={edit_duration_limits}
-					bind:release_year_limits={edit_release_year_limits}
-					bind:required_artists={edit_required_artists}
-				/>
 				<buttons>
 					<button class="click" disabled={filtered_playlist.updating} onclick={save}>done</button>
 					<button
@@ -119,15 +79,6 @@
 				<expression-editor>
 					<ExpressionNode node={filtered_playlist.expression} {playlists} readonly />
 				</expression-editor>
-				{#if get_duration_limit_str(filtered_playlist.duration_limits) !== ''}
-					<div>{get_duration_limit_str(filtered_playlist.duration_limits)}</div>
-				{/if}
-				{#if get_release_year_limit_str(filtered_playlist.release_year_limits) !== ''}
-					<div>{get_release_year_limit_str(filtered_playlist.release_year_limits)}</div>
-				{/if}
-				{#if get_required_artists_str() !== ''}
-					<div>{get_required_artists_str()}</div>
-				{/if}
 				<buttons>
 					<button
 						class="click"
