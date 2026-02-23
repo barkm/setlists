@@ -1,11 +1,18 @@
 <script lang="ts">
 	import { type Playlist } from '$lib/spotify/api';
-	import { createFilteredPlaylist, type FilteredPlaylist } from '$lib/filtered';
+	import {
+		createFilteredPlaylist,
+		collectPlaylistIds,
+		type FilteredPlaylist,
+		type PlaylistNode
+	} from '$lib/filtered';
 	import { onMount } from 'svelte';
 	import RandomSquare from './RandomSquare.svelte';
 	import { authorizedRequest, getScopes } from '$lib/spotify/authorization';
 	import { logged_in_guard } from '$lib/login';
-	import CreationOptions from './CreationOptions.svelte';
+	import ExpressionNode from './ExpressionNode.svelte';
+	import PlaylistPrivacy from './PlaylistPrivacy.svelte';
+	import TracksFilter from './TracksFilter.svelte';
 
 	interface Props {
 		playlists: Playlist[];
@@ -18,9 +25,7 @@
 
 	let scopes = getScopes();
 	let is_public = $state(!scopes.includes('playlist-modify-private'));
-	let included_playlists: Playlist[] = $state([]);
-	let excluded_playlists: Playlist[] = $state([]);
-	let required_playlists: Playlist[] = $state([]);
+	let expression = $state<PlaylistNode>({ type: 'union', operands: [] });
 
 	let canvas: HTMLCanvasElement | undefined = $state(undefined);
 
@@ -52,6 +57,8 @@
 	let duration_limits = $state({ min: 0, max: Infinity });
 	let release_year_limits = $state({ min: -Infinity, max: Infinity });
 	let required_artists = $state([]);
+
+	const has_playlists = $derived(collectPlaylistIds(expression).length > 0);
 </script>
 
 <inputrow>
@@ -60,7 +67,7 @@
 	</cover>
 	<input type="text" bind:value={playlist_name} {placeholder} />
 	<button
-		disabled={creating || playlist_name === '' || included_playlists.length === 0}
+		disabled={creating || playlist_name === '' || !has_playlists}
 		onclick={logged_in_guard(async () => {
 			if (!canvas) {
 				console.log('no canvas');
@@ -71,9 +78,8 @@
 				authorizedRequest,
 				canvas.toDataURL('image/jpeg'),
 				playlist_name,
-				included_playlists,
-				excluded_playlists,
-				required_playlists,
+				expression,
+				playlists,
 				is_public,
 				duration_limits,
 				release_year_limits,
@@ -81,21 +87,19 @@
 			);
 			filtered_playlists = [filtered_playlist, ...filtered_playlists];
 			playlist_name = '';
-			included_playlists = [];
-			excluded_playlists = [];
-			required_playlists = [];
+			expression = { type: 'union', operands: [] };
 			creating = false;
 		})}>create</button
 	>
 </inputrow>
 
 {#if playlist_name !== ''}
-	<CreationOptions
-		{playlists}
-		bind:included_playlists
-		bind:excluded_playlists
-		bind:required_playlists
-		bind:is_public
+	<PlaylistPrivacy bind:is_public />
+	<expression-editor>
+		<ExpressionNode bind:node={expression} {playlists} />
+	</expression-editor>
+	<TracksFilter
+		{expression}
 		bind:duration_limits
 		bind:release_year_limits
 		bind:required_artists
@@ -132,5 +136,12 @@
 		margin-left: 1em;
 		align-self: center;
 		flex-basis: auto;
+	}
+
+	expression-editor {
+		display: block;
+		width: 100%;
+		margin-top: 1.5em;
+		margin-bottom: 1.5em;
 	}
 </style>

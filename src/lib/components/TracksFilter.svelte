@@ -1,106 +1,78 @@
 <script lang="ts">
-	import { type Artist, type Playlist, type Track } from '$lib/spotify/api';
+	import { type Artist } from '$lib/spotify/api';
 	import { authorizedRequest } from '$lib/spotify/authorization';
-	import { filterTracks, getTracksFromPlaylists } from '$lib/filtered';
+	import {
+		filterTracks,
+		getTracksFromExpression,
+		collectPlaylistIds,
+		type PlaylistNode
+	} from '$lib/filtered';
 	import RangeSlider from 'svelte-range-slider-pips';
 	import { ms_to_min_sec, type Limits } from '$lib/duration';
 	import { logged_in_guard } from '$lib/login';
 	import ArtistsDropDown from './ArtistsDropDown.svelte';
 
 	interface Props {
-		included_playlists: Playlist[];
-		excluded_playlists: Playlist[];
-		required_playlists: Playlist[];
+		expression: PlaylistNode;
 		duration_limits: Limits;
 		release_year_limits: Limits;
 		required_artists: Artist[];
 	}
 
 	let {
-		included_playlists,
-		excluded_playlists,
-		required_playlists,
+		expression,
 		duration_limits = $bindable(),
 		release_year_limits = $bindable(),
 		required_artists = $bindable()
 	}: Props = $props();
 
-	let included_tracks = $derived(
-		logged_in_guard(getTracksFromPlaylists)(authorizedRequest, included_playlists)
-	);
-	let excluded_tracks = $derived(
-		logged_in_guard(getTracksFromPlaylists)(authorizedRequest, excluded_playlists)
-	);
-	let required_tracks = $derived(
-		logged_in_guard(getTracksFromPlaylists)(authorizedRequest, required_playlists)
+	const has_playlists = $derived(collectPlaylistIds(expression).length > 0);
+
+	let raw_tracks = $derived(
+		logged_in_guard(getTracksFromExpression)(authorizedRequest, expression)
 	);
 
-	const get_tracks = async (
+	const apply_filters = async (
 		limits: Limits,
-		release_year_limits: Limits,
-		required_artists: Artist[]
-	) => {
-		let [included, excluded, required] = await Promise.all([
-			included_tracks,
-			excluded_tracks,
-			required_tracks
-		]);
-		if (included === undefined || excluded === undefined || required === undefined) {
-			return [];
-		}
-		return filterTracks(
-			included,
-			excluded,
-			required,
-			limits,
-			release_year_limits,
-			required_artists
-		);
+		year_limits: Limits,
+		artists: Artist[]
+	): Promise<Track[]> => {
+		const tracks = await raw_tracks;
+		if (tracks === undefined) return [];
+		return filterTracks(tracks, [], [], limits, year_limits, artists);
 	};
 
-	let all_tracks = $derived.by(async () =>
-		get_tracks({ min: 0, max: Infinity }, { min: -Infinity, max: Infinity }, [])
+	let all_tracks = $derived.by(() =>
+		apply_filters({ min: 0, max: Infinity }, { min: -Infinity, max: Infinity }, [])
 	);
 
 	let init_duration_limits = $derived.by(async () => {
 		let tracks_resolved = await all_tracks;
 		if (tracks_resolved.length === 0) {
-			return {
-				min: 0,
-				max: 0
-			};
+			return { min: 0, max: 0 };
 		}
 		let durations = tracks_resolved.map((t) => t.duration_ms);
-		let min_duration = Math.round(Math.min(...durations)) - 1;
-		let max_duration = Math.round(Math.max(...durations)) + 1;
 		return {
-			min: min_duration,
-			max: max_duration
+			min: Math.round(Math.min(...durations)) - 1,
+			max: Math.round(Math.max(...durations)) + 1
 		};
 	});
 
 	let init_release_year_limits = $derived.by(async () => {
 		let tracks_resolved = await all_tracks;
 		if (tracks_resolved.length === 0) {
-			return {
-				min: 0,
-				max: 0
-			};
+			return { min: 0, max: 0 };
 		}
 		let release_years = tracks_resolved.map((t) => t.album.release_year);
-		let min_release_year = Math.min(...release_years) - 1;
-		let max_release_year = Math.max(...release_years) + 1;
 		return {
-			min: min_release_year,
-			max: max_release_year
+			min: Math.min(...release_years) - 1,
+			max: Math.max(...release_years) + 1
 		};
 	});
 
 	let all_artists = $derived.by(async () => {
 		let tracks_resolved = await all_tracks;
-		if (tracks_resolved.length === 0) {
-			return [];
-		}
+		if (tracks_resolved.length === 0) return [];
 		let all_artists = tracks_resolved.map((t) => t.artists).flat();
 		let unique_artist_ids = new Set();
 		let unique_artists: Artist[] = [];
@@ -113,13 +85,13 @@
 		return unique_artists.sort((a, b) => a.name.localeCompare(b.name));
 	});
 
-	let filtered_tracks = $derived.by(async () =>
-		get_tracks(duration_limits, release_year_limits, required_artists)
+	let filtered_tracks = $derived.by(() =>
+		apply_filters(duration_limits, release_year_limits, required_artists)
 	);
 </script>
 
 <container>
-	{#if included_playlists.length !== 0}
+	{#if has_playlists}
 		{#await Promise.all([all_artists, init_duration_limits, init_release_year_limits])}
 			<p>loading...</p>
 		{:then [all_artists, init_duration_limits, init_release_year_limits]}
@@ -248,10 +220,10 @@
 	}
 
 	:global(:root) {
-		--range-slider: #d7dada; /* slider main background color */
-		--range-handle-inactive: #000000; /* inactive handle color */
-		--range-handle: #ffffff; /* non-focussed handle color */
-		--range-handle-focus: #000000; /* focussed handle color */
+		--range-slider: #d7dada;
+		--range-handle-inactive: #000000;
+		--range-handle: #ffffff;
+		--range-handle-focus: #000000;
 	}
 
 	filtered-tracks {

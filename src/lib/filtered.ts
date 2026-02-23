@@ -132,7 +132,7 @@ const serializeDefinition = (
 	required_artist_ids: required_artists.map((a) => a.id)
 });
 
-const collectPlaylistIds = (node: PlaylistNode): string[] => {
+export const collectPlaylistIds = (node: PlaylistNode): string[] => {
 	switch (node.type) {
 		case 'playlist':
 			return [node.id];
@@ -145,93 +145,33 @@ const collectPlaylistIds = (node: PlaylistNode): string[] => {
 	}
 };
 
-// Builds the canonical simple expression from three playlist arrays.
-export const buildSimpleExpression = (
-	included: Playlist[],
-	excluded: Playlist[],
-	required: Playlist[]
-): PlaylistNode => {
-	let expression: PlaylistNode = idsToNode(included.map((p) => p.id));
-	if (excluded.length > 0) {
-		expression = {
-			type: 'difference',
-			left: expression,
-			right: idsToNode(excluded.map((p) => p.id))
-		};
-	}
-	if (required.length > 0) {
-		expression = {
-			type: 'intersection',
-			operands: [expression, idsToNode(required.map((p) => p.id))]
-		};
-	}
-	return expression;
-};
-
-// Extracts included/excluded/required playlist arrays from the canonical simple expression form.
-// Falls back to showing all playlists as included for general expressions.
-export const getSimplePlaylists = (
-	expression: PlaylistNode,
-	playlists: Map<string, Playlist>
-): { included: Playlist[]; excluded: Playlist[]; required: Playlist[] } => {
-	const lookup = (ids: string[]): Playlist[] =>
-		ids.map((id) => playlists.get(id)).filter((p): p is Playlist => p !== undefined);
-
-	const extractIds = (node: PlaylistNode): string[] => {
-		if (node.type === 'playlist') return [node.id];
-		if (node.type === 'union') return node.operands.flatMap(extractIds);
-		return [];
-	};
-
-	// Canonical form with required: intersection([difference(union(incl), union(excl)), union(req)])
-	if (expression.type === 'intersection' && expression.operands.length === 2) {
-		const [first, second] = expression.operands;
-		if (first.type === 'difference') {
-			return {
-				included: lookup(extractIds(first.left)),
-				excluded: lookup(extractIds(first.right)),
-				required: lookup(extractIds(second))
-			};
-		}
-	}
-
-	// Canonical form without required: difference(union(incl), union(excl))
-	if (expression.type === 'difference') {
-		return {
-			included: lookup(extractIds(expression.left)),
-			excluded: lookup(extractIds(expression.right)),
-			required: []
-		};
-	}
-
-	// Fallback: all as included
-	return {
-		included: lookup([...new Set(collectPlaylistIds(expression))]),
-		excluded: [],
-		required: []
-	};
+export const getTracksFromExpression = async (
+	make_request: MakeRequest,
+	expression: PlaylistNode
+): Promise<Track[]> => {
+	const ids = [...new Set(collectPlaylistIds(expression))];
+	const entries = await Promise.all(
+		ids.map(async (id) => [id, await getTracks(id, make_request)] as const)
+	);
+	const tracksByPlaylist = new Map(entries);
+	return evaluateExpression(expression, tracksByPlaylist);
 };
 
 export const createFilteredPlaylist = async (
 	make_request: MakeRequest,
 	cover_data: string,
 	name: string,
-	included_playlists: Playlist[],
-	excluded_playlists: Playlist[],
-	required_playlists: Playlist[],
+	expression: PlaylistNode,
+	all_playlists: Playlist[],
 	is_public: boolean,
 	duration_limits: Limits,
 	release_year_limits: Limits,
 	required_artists: Artist[]
 ): Promise<FilteredPlaylist> => {
 	const playlist = await createPlaylist(name, is_public, '');
-	const expression = buildSimpleExpression(
-		included_playlists,
-		excluded_playlists,
-		required_playlists
-	);
+	const referenced_ids = new Set(collectPlaylistIds(expression));
 	const playlists = new Map(
-		[...included_playlists, ...excluded_playlists, ...required_playlists].map((p) => [p.id, p])
+		all_playlists.filter((p) => referenced_ids.has(p.id)).map((p) => [p.id, p])
 	);
 	return updateDefinition(
 		make_request,
