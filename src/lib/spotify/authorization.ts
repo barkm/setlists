@@ -1,11 +1,11 @@
 import { browser } from '$app/environment';
-import { base } from '$app/paths';
+import { resolve } from '$app/paths';
 import { PUBLIC_SPOTIFY_CLIENT_ID } from '$env/static/public';
 import type { MakeRequest } from './request';
 
 const CONFIG = {
 	client_id: PUBLIC_SPOTIFY_CLIENT_ID,
-	redirect_endpoint: base + '/callback'
+	redirect_endpoint: resolve('/callback')
 };
 
 const LOCAL_STORAGE_PREFIX = 'filtered_playlists:';
