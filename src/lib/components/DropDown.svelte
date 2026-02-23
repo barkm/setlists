@@ -30,14 +30,15 @@
 	{placeholder}
 	options={multiselect_options}
 	bind:selected={multiselect_selected}
-	let:option
-	on:change={() => {
+	onchange={() => {
 		selected = multiselect_selected.map((s) => s.value);
 	}}
-	on:removeAll={() => {
+	onremoveAll={() => {
 		selected = [];
 		multiselect_selected = [];
 	}}
 >
-	{@render option_snippet(option.value)}
+	{#snippet children({ option })}
+		{@render option_snippet(option.value)}
+	{/snippet}
 </MultiSelect>
