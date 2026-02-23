@@ -24,35 +24,57 @@
 	const empty_union = (): PlaylistNode => ({ type: 'union', operands: [] });
 	const empty_playlist = (): PlaylistNode => ({ type: 'playlist', id: playlists[0]?.id ?? '' });
 
+	type NaryType = 'union' | 'intersection';
+
+	const playlist_from_nary = (old: { operands: PlaylistNode[] }): PlaylistNode =>
+		old.operands.find((n) => n.type === 'playlist') ?? empty_playlist();
+
+	const playlist_from_difference = (old: { left: PlaylistNode }): PlaylistNode =>
+		old.left.type === 'playlist' ? old.left : empty_playlist();
+
+	const nary_from_nary = (new_type: NaryType, old: { operands: PlaylistNode[] }): PlaylistNode =>
+		({ type: new_type, operands: old.operands }) as PlaylistNode;
+
+	const nary_from_difference = (new_type: NaryType, old: { left: PlaylistNode; right: PlaylistNode }): PlaylistNode =>
+		({ type: new_type, operands: [old.left, old.right] }) as PlaylistNode;
+
+	const nary_from_playlist = (new_type: NaryType, old: PlaylistNode): PlaylistNode =>
+		({ type: new_type, operands: [old] }) as PlaylistNode;
+
+	const difference_from_nary = (old: { operands: PlaylistNode[] }): PlaylistNode => {
+		const [first, ...rest] = old.operands;
+		return {
+			type: 'difference',
+			left: first ?? empty_union(),
+			right: rest.length === 1 ? (rest[0] ?? empty_union()) : { type: 'union', operands: rest }
+		};
+	};
+
+	const difference_from_other = (old: PlaylistNode): PlaylistNode =>
+		({ type: 'difference', left: old, right: empty_union() });
+
 	const change_type = (new_type: PlaylistNode['type']) => {
 		if (new_type === node.type) return;
 		const old = node;
 		if (new_type === 'playlist') {
 			if (old.type === 'union' || old.type === 'intersection') {
-				setNode(old.operands.find((n) => n.type === 'playlist') ?? empty_playlist());
+				setNode(playlist_from_nary(old));
 			} else if (old.type === 'difference') {
-				setNode(old.left.type === 'playlist' ? old.left : empty_playlist());
+				setNode(playlist_from_difference(old));
 			}
 		} else if (new_type === 'union' || new_type === 'intersection') {
 			if (old.type === 'union' || old.type === 'intersection') {
-				setNode({ type: new_type, operands: old.operands } as PlaylistNode);
+				setNode(nary_from_nary(new_type, old));
 			} else if (old.type === 'difference') {
-				setNode({ type: new_type, operands: [old.left, old.right] } as PlaylistNode);
+				setNode(nary_from_difference(new_type, old));
 			} else {
-				setNode({ type: new_type, operands: [old] } as PlaylistNode);
+				setNode(nary_from_playlist(new_type, old));
 			}
 		} else {
-			// → difference
 			if (old.type === 'union' || old.type === 'intersection') {
-				const [first, ...rest] = old.operands;
-				setNode({
-					type: 'difference',
-					left: first ?? empty_union(),
-					right: rest.length === 1 ? (rest[0] ?? empty_union()) : { type: 'union', operands: rest }
-				});
+				setNode(difference_from_nary(old));
 			} else {
-				// playlist or difference → difference
-				setNode({ type: 'difference', left: old, right: empty_union() });
+				setNode(difference_from_other(old));
 			}
 		}
 	};
