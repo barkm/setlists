@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { login, logout } from '$lib/spotify/authorization';
+	import { asset } from '$app/paths';
 	import Main from './Main.svelte';
 	import PermissionsSelector from './MultiSelector.svelte';
 	import { is_logged_in, logged_in_guard } from '$lib/login';
@@ -67,7 +68,7 @@
 			{/if}
 			<footer>
 				powered by
-				<img src="/spotify.svg" alt="Spotify logo" />
+				<img src={asset('/spotify.svg')} alt="Spotify logo" />
 			</footer>
 		</content>
 	{/await}
