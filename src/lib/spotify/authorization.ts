@@ -216,6 +216,8 @@ const refreshAccessToken = async (): Promise<string | null> => {
 	const expires_at = Date.now() + 1000 * body.expires_in;
 	toLocalStorage('access_token', body.access_token);
 	toLocalStorage('expires_at', expires_at.toString());
-	toLocalStorage('refresh_token', body.refresh_token);
+	if (body.refresh_token) {
+		toLocalStorage('refresh_token', body.refresh_token);
+	}
 	return body.access_token;
 };
