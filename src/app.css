@@ -7,8 +7,23 @@ html {
 	font-family: 'Roboto Mono', monospace;
 }
 
-input {
+input,
+select {
 	font-family: 'Roboto Mono', monospace;
+}
+
+select {
+	-webkit-appearance: none;
+	appearance: none;
+	border-radius: 0;
+	border: 1px solid #000000;
+	font-size: 1em;
+	background-color: #ffffff;
+	color: #000000;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23000'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 0.5em center;
+	padding: 0.3em 2em 0.3em 0.7em;
 }
 
 button {

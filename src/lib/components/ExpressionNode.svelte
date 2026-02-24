@@ -35,8 +35,10 @@
 	const nary_from_nary = (new_type: NaryType, old: { operands: PlaylistNode[] }): PlaylistNode =>
 		({ type: new_type, operands: old.operands }) as PlaylistNode;
 
-	const nary_from_difference = (new_type: NaryType, old: { left: PlaylistNode; right: PlaylistNode }): PlaylistNode =>
-		({ type: new_type, operands: [old.left, old.right] }) as PlaylistNode;
+	const nary_from_difference = (
+		new_type: NaryType,
+		old: { left: PlaylistNode; right: PlaylistNode }
+	): PlaylistNode => ({ type: new_type, operands: [old.left, old.right] }) as PlaylistNode;
 
 	const nary_from_playlist = (new_type: NaryType, old: PlaylistNode): PlaylistNode =>
 		({ type: new_type, operands: [old] }) as PlaylistNode;
@@ -50,8 +52,11 @@
 		};
 	};
 
-	const difference_from_other = (old: PlaylistNode): PlaylistNode =>
-		({ type: 'difference', left: old, right: empty_union() });
+	const difference_from_other = (old: PlaylistNode): PlaylistNode => ({
+		type: 'difference',
+		left: old,
+		right: empty_union()
+	});
 
 	const change_type = (new_type: PlaylistNode['type']) => {
 		if (new_type === node.type) return;
@@ -130,7 +135,7 @@
 			</select>
 		{/if}
 	{:else if (node.type === 'union' || node.type === 'intersection') && !readonly}
-		<button onclick={add_child}>+ add</button>
+		<button onclick={add_child}>+</button>
 	{/if}
 
 	{#if !readonly && onremove}
@@ -147,7 +152,11 @@
 				{playlists}
 				{readonly}
 				onremove={() => remove_child(i)}
-				onchange={(newNode) => setNode({ ...node, operands: operands.map((o, j) => j === i ? newNode : o) } as PlaylistNode)}
+				onchange={(newNode) =>
+					setNode({
+						...node,
+						operands: operands.map((o, j) => (j === i ? newNode : o))
+					} as PlaylistNode)}
 			/>
 		{/each}
 	</children>
@@ -196,9 +205,15 @@
 		margin-top: 0.3em;
 	}
 
-	button, select {
+	button {
 		font: inherit;
 		padding: 0.3em 0.7em;
+		border-radius: 0;
+		border: 1px solid black;
+	}
+
+	select {
+		font: inherit;
 		border-radius: 0;
 		border: 1px solid black;
 	}
