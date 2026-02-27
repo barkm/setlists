@@ -178,7 +178,7 @@ export const getTracks = async (
 	playlist_id: string,
 	make_request: MakeRequest = authorizedRequest
 ): Promise<Track[]> => {
-	let url: string | null = `https://api.spotify.com/v1/playlists/${playlist_id}/tracks`;
+	let url: string | null = `https://api.spotify.com/v1/playlists/${playlist_id}/items`;
 	let tracks: Track[] = [];
 	while (url) {
 		const response: GetTracksResponse = await make_request(url, 'GET', handleGetTracksResponse);
@@ -247,7 +247,7 @@ const addTracksChunk = async (
 	make_request: MakeRequest = authorizedRequest
 ): Promise<void> => {
 	await make_request(
-		`https://api.spotify.com/v1/playlists/${playlist_id}/tracks`,
+		`https://api.spotify.com/v1/playlists/${playlist_id}/items`,
 		'POST',
 		handleAddTracksChunkResponse,
 		'application/json',
@@ -269,7 +269,7 @@ export const replaceTracks = async (
 	make_request: MakeRequest = authorizedRequest
 ): Promise<void> => {
 	await make_request(
-		`https://api.spotify.com/v1/playlists/${playlist_id}/tracks`,
+		`https://api.spotify.com/v1/playlists/${playlist_id}/items`,
 		'PUT',
 		handleReplaceTracksResponse,
 		'application/json',
