@@ -142,7 +142,7 @@ export const unfollowPlaylist = async (
 	make_request: MakeRequest = authorizedRequest
 ): Promise<void> => {
 	await make_request(
-		`https://api.spotify.com/v1/playlists/${playlist_id}/followers`,
+		`https://api.spotify.com/v1/me/library?uris=spotify:playlist:${playlist_id}`,
 		'DELETE',
 		handleUnfollowPlaylistResponse,
 		'application/json'
