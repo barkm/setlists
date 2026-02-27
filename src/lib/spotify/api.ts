@@ -94,9 +94,8 @@ export const createPlaylist = async (
 	description: string,
 	make_request: MakeRequest = authorizedRequest
 ): Promise<Playlist> => {
-	const user = await getUser();
 	return await make_request(
-		`https://api.spotify.com/v1/users/${user.id}/playlists`,
+		`https://api.spotify.com/v1/me/playlists`,
 		'POST',
 		handleCreatePlaylistResponse,
 		'application/json',
